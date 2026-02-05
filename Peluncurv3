@@ -1,0 +1,13 @@
+-- Menjalankan Projek basic di thread terpisah
+task.spawn(function()
+    pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/IkhsanFedly121/RobloxV3/refs/heads/main/Clientv3"))()
+    end)
+end)
+
+-- Menjalankan Projek autowalk di thread terpisah
+task.spawn(function()
+    pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/IkhsanFedly121/RobloxV2/refs/heads/main/AutoWalk"))()
+    end)
+end)
