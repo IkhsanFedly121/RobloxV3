@@ -1,0 +1,1083 @@
+-- ====================== SKRIP UTAMA ROBLOX V3 ======================
+local Player = game.Players.LocalPlayer
+local UIS = game:GetService("UserInputService")
+local RS = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+
+-- Variabel Status dengan teknik obfuscation
+local menuOpen = false 
+local keyRemainingSeconds = 0 
+local flying = false
+local noclipEnabled = false
+local speedEnabled = false
+
+-- Simpan status dalam tabel terenkripsi
+local _statusTable = {
+    {v = 102, a = 108, s = 101}, -- false
+    k = "invalid",
+    t = 0
+}
+
+-- Fungsi untuk mengakses status key
+local function getKeyStatus()
+    local byte1 = _statusTable[1].v
+    local byte2 = _statusTable[1].a
+    local byte3 = _statusTable[1].s
+    local byte4 = _statusTable[1].e or 115 -- 's' untuk true
+    
+    local str = string.char(byte1, byte2, byte3, byte4)
+    return str == "true"
+end
+
+local function setKeyStatus(status)
+    if status then
+        _statusTable[1] = {v = 116, a = 114, s = 117, e = 101} -- true
+    else
+        _statusTable[1] = {v = 102, a = 108, s = 101} -- false
+    end
+end
+
+-- Gunakan wrapper function
+local function isKeyValid()
+    return getKeyStatus()
+end
+
+-- Simpan di _G dengan nama yang misleading
+_G.SystemSettings = {
+    GameVersion = "1.0",
+    DebugMode = false,
+    Features = {}
+}
+
+_G.flying = flying
+_G.noclipEnabled = noclipEnabled
+_G.speedEnabled = speedEnabled
+local speedFly = 75
+local flyPlatform 
+
+-- URL GAS
+local BASE_URL = "https://script.google.com/macros/s/AKfycbyXjFcfB2ctZhutC5Qoqvk7fgsuwKUZqAhZEck69elYc8FYPz7RB6Q_Z8BTkX1X7AmoKQ/exec"
+
+-- ================= SISTEM HEARTBEAT ===================
+local heartbeatActive = false
+local currentKey = ""
+local lastHeartbeatTime = 0
+
+local function startHeartbeat()
+    if heartbeatActive then return end
+    heartbeatActive = true
+    
+    print("[HEARTBEAT] Starting for key:", currentKey)
+    
+    task.spawn(function()
+        local heartbeatCount = 0
+        
+        while heartbeatActive and isKeyValid() and currentKey ~= "" do
+            heartbeatCount = heartbeatCount + 1
+            
+            print(string.format("[HEARTBEAT #%d] Key: %s", heartbeatCount, currentKey))
+            
+            local success, response = pcall(function()
+                local payload = HttpService:JSONEncode({
+                    key = currentKey,
+                    userid = Player.UserId,
+                    _r = tostring(tick()):gsub("%.", "")
+                })
+                
+                local request = HttpService:RequestAsync({
+                    Url = BASE_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json"
+                    },
+                    Body = payload
+                })
+                
+                return request
+            end)
+            
+            if success then
+                lastHeartbeatTime = os.time()
+            end
+            
+            -- Tunggu 10 detik
+            local waitStart = os.time()
+            while os.time() - waitStart < 10 and heartbeatActive do
+                wait(1)
+            end
+        end
+        
+        print("[HEARTBEAT] Stopped. Total:", heartbeatCount)
+    end)
+end
+
+local function stopHeartbeat()
+    heartbeatActive = false
+    print("[HEARTBEAT] Stopped")
+end
+
+local function serverLogout()
+    if currentKey == "" then return false end
+    
+    local randomParam = tostring(tick()):gsub("%.", "")
+    local url = BASE_URL .. "?key=" .. currentKey .. "&userid=" .. Player.UserId .. "&action=logout&_r=" .. randomParam
+    
+    local success, response = pcall(function()
+        return game:HttpGet(url, true, {Timeout = 5})
+    end)
+    
+    return success
+end
+
+-- ================= KARAKTER SETUP V3 ===================
+local HRP
+local hum
+local function setupCharacter(char)
+    HRP = char:WaitForChild("HumanoidRootPart")
+    hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        -- V3 FIX: JANGAN SENTUH WALKSPEED!
+        -- Biarkan 100% dikontrol server/coil
+        hum.JumpPower = 50  -- JumpPower masih boleh diatur
+        
+        -- Hanya matikan fitur VIP jika sedang aktif
+        if flying then toggleFly(false) end
+        if noclipEnabled then toggleNoclip(false) end
+        if speedEnabled then toggleSpeed(false) end
+    end
+end
+
+if Player.Character then setupCharacter(Player.Character) end
+Player.CharacterAdded:Connect(setupCharacter)
+
+-- ================= UI Setup ===================
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local UI_NAME = "LogoMenuUI"
+
+local function cleanExistingUI(guiContainer)
+    for _, existingGui in pairs(guiContainer:GetChildren()) do
+        if existingGui:IsA("ScreenGui") and existingGui.Name == UI_NAME then
+            existingGui:Destroy()
+        elseif existingGui:IsA("Frame") and existingGui.Name == "MainMenuFrame" then
+            existingGui:Destroy()
+        end
+    end
+end
+
+cleanExistingUI(PlayerGui)
+wait(0.1)
+
+local gui = Instance.new("ScreenGui")
+gui.Name = UI_NAME
+gui.ResetOnSpawn = false
+gui.Parent = PlayerGui
+
+-- Logo Button
+local logoButton = Instance.new("ImageButton")
+logoButton.Size = UDim2.new(0,50,0,50)
+logoButton.Position = UDim2.new(0.92, 45, 0.1, 0) 
+logoButton.BackgroundColor3 = Color3.fromRGB(0, 150, 255) 
+logoButton.BackgroundTransparency = 0.05 
+logoButton.Image = "" 
+logoButton.AutoButtonColor = true
+logoButton.ClipsDescendants = false 
+logoButton.Visible = true
+logoButton.Parent = gui
+
+local uicorner = Instance.new("UICorner")
+uicorner.CornerRadius = UDim.new(1,0)
+uicorner.Parent = logoButton
+
+local shadowLogo = Instance.new("UIStroke") 
+shadowLogo.Thickness = 2
+shadowLogo.Color = Color3.fromRGB(0, 100, 200)
+shadowLogo.Parent = logoButton
+
+-- Menu Frame
+local menuFrame = Instance.new("Frame")
+menuFrame.Name = "MainMenuFrame" 
+menuFrame.Size = UDim2.new(0,300,0,450)
+menuFrame.Position = UDim2.new(1, -100, 0.18, 0)
+menuFrame.BackgroundTransparency = 0 
+menuFrame.Visible = false
+menuFrame.Parent = gui
+menuFrame.Active = true
+
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0,15)
+frameCorner.Parent = menuFrame
+
+local frameBorder = Instance.new("UIStroke") 
+frameBorder.Thickness = 1
+frameBorder.Color = Color3.fromRGB(50, 50, 50)
+frameBorder.Parent = menuFrame
+
+-- Helper Functions
+local function createButton(parent,text,posY)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.8,0,0.12,0)
+    btn.Position = UDim2.new(0.1,0,posY,0)
+    btn.Text = text
+    btn.Font = Enum.Font.SourceSans
+    btn.TextScaled = true
+    btn.BackgroundColor3 = Color3.fromRGB(0, 150, 255) 
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = parent
+    btn.AutoButtonColor = true 
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8) 
+    corner.Parent = btn
+    local shadow = Instance.new("UIStroke")
+    shadow.Thickness = 1
+    shadow.Color = Color3.fromRGB(0, 100, 200)
+    shadow.Parent = btn
+    return btn
+end
+
+local function formatTime(seconds)
+    local days = math.floor(seconds / 86400)
+    local hours = math.floor((seconds % 86400) / 3600)
+    local mins = math.floor((seconds % 3600) / 60)
+    local secs = math.floor(seconds % 60)
+    if days > 0 then
+        return string.format("%d hari %02d:%02d:%02d", days, hours, mins, secs)
+    else
+        return string.format("%02d:%02d:%02d", hours, mins, secs)
+    end
+end
+
+-- Noclip Helper
+local function setNoclip(character)
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not noclipEnabled
+        end
+    end
+end
+
+-- Fly Platform Setup
+flyPlatform = Instance.new("Part")
+flyPlatform.Name = "FlyPlatform"
+flyPlatform.Anchored = true
+flyPlatform.CanCollide = false
+flyPlatform.Size = Vector3.new(5,0.1,5)
+flyPlatform.Transparency = 1
+flyPlatform.Parent = Workspace
+
+-- ================= Sub-Menu Declarations ===================
+local keyMenu = Instance.new("Frame")
+keyMenu.Name = "KeyMenu"
+keyMenu.Size = UDim2.new(1,0,1,0)
+keyMenu.BackgroundTransparency = 1 
+keyMenu.Visible = true 
+keyMenu.Parent = menuFrame
+
+local headerTitle = Instance.new("TextLabel")
+headerTitle.Size = UDim2.new(0.9,0,0.08,0)
+headerTitle.Position = UDim2.new(0.05,0,0.02,0)
+headerTitle.BackgroundTransparency = 1
+headerTitle.TextColor3 = Color3.fromRGB(255,215,0)
+headerTitle.Font = Enum.Font.SourceSansBold
+headerTitle.TextScaled = true
+headerTitle.Text = "Cheat Sederhana"
+headerTitle.Parent = keyMenu
+
+local priceListFrame = Instance.new("Frame")
+priceListFrame.Size = UDim2.new(0.9,0,0.35,0)
+priceListFrame.Position = UDim2.new(0.05,0,0.12,0)
+priceListFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+priceListFrame.BackgroundTransparency = 0.1
+priceListFrame.Parent = keyMenu
+
+local priceCorner = Instance.new("UICorner")
+priceCorner.CornerRadius = UDim.new(0,10)
+priceCorner.Parent = priceListFrame
+
+local priceBorder = Instance.new("UIStroke")
+priceBorder.Thickness = 2
+priceBorder.Color = Color3.fromRGB(0, 150, 255)
+priceBorder.Parent = priceListFrame
+
+local priceItems = {
+    "Tobat Bang",
+    "jangan takut", 
+    "Jangan Kahwatir",
+    "Ini Kentut",
+    "Bukan Petir"
+}
+
+for i, priceText in ipairs(priceItems) do
+    local priceItem = Instance.new("TextLabel")
+    priceItem.Size = UDim2.new(0.9,0,0.16,0)
+    priceItem.Position = UDim2.new(0.05,0,(i-1)*0.18 + 0.05,0)
+    priceItem.BackgroundTransparency = 1
+    priceItem.TextColor3 = Color3.fromRGB(255,255,255)
+    priceItem.Font = Enum.Font.SourceSans
+    priceItem.TextScaled = true
+    priceItem.Text = priceText
+    priceItem.TextXAlignment = Enum.TextXAlignment.Left
+    priceItem.Parent = priceListFrame
+end
+
+local contactFrame = Instance.new("Frame")
+contactFrame.Size = UDim2.new(0.9,0,0.08,0)
+contactFrame.Position = UDim2.new(0.05,0,0.49,0)
+contactFrame.BackgroundColor3 = Color3.fromRGB(25, 135, 84)
+contactFrame.Parent = keyMenu
+
+local contactCorner = Instance.new("UICorner")
+contactCorner.CornerRadius = UDim.new(0,8)
+contactCorner.Parent = contactFrame
+
+local contactLabel = Instance.new("TextLabel")
+contactLabel.Size = UDim2.new(1,0,1,0)
+contactLabel.Position = UDim2.new(0,0,0,0)
+contactLabel.BackgroundTransparency = 1
+contactLabel.TextColor3 = Color3.fromRGB(255,255,255)
+contactLabel.Font = Enum.Font.SourceSansBold
+contactLabel.TextScaled = true
+contactLabel.Text = "Gass ken push top global"
+contactLabel.Parent = contactFrame
+
+local keyBox = Instance.new("TextBox")
+keyBox.Size = UDim2.new(0.9,0,0.12,0)
+keyBox.Position = UDim2.new(0.05,0,0.6,0)
+keyBox.PlaceholderText = "Masukkan Key Premium Anda"
+keyBox.Text = ""
+keyBox.ClearTextOnFocus = false
+keyBox.TextScaled = true
+keyBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+keyBox.BackgroundTransparency = 0.3
+keyBox.TextColor3 = Color3.fromRGB(0, 255, 150)
+keyBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+keyBox.TextXAlignment = Enum.TextXAlignment.Center
+keyBox.Font = Enum.Font.SourceSansBold
+keyBox.Parent = keyMenu
+
+local keyBoxCorner = Instance.new("UICorner")
+keyBoxCorner.CornerRadius = UDim.new(0,12)
+keyBoxCorner.Parent = keyBox
+
+local keyBoxBorder = Instance.new("UIStroke")
+keyBoxBorder.Thickness = 3
+keyBoxBorder.Color = Color3.fromRGB(0, 255, 150)
+keyBoxBorder.Transparency = 0.2
+keyBoxBorder.Parent = keyBox
+
+local keyBoxGlow = Instance.new("UIStroke")
+keyBoxGlow.Thickness = 6
+keyBoxGlow.Color = Color3.fromRGB(0, 255, 150)
+keyBoxGlow.Transparency = 0.7
+keyBoxGlow.Parent = keyBox
+
+keyBox.Focused:Connect(function()
+    keyBoxBorder.Color = Color3.fromRGB(255, 215, 0)
+    keyBoxGlow.Color = Color3.fromRGB(255, 215, 0)
+    keyBox.TextColor3 = Color3.fromRGB(255, 215, 0)
+end)
+
+keyBox.FocusLost:Connect(function()
+    keyBoxBorder.Color = Color3.fromRGB(0, 255, 150)
+    keyBoxGlow.Color = Color3.fromRGB(0, 255, 150)
+    keyBox.TextColor3 = Color3.fromRGB(0, 255, 150)
+end)
+
+local submitKeyButton = Instance.new("TextButton")
+submitKeyButton.Size = UDim2.new(0.6,0,0.12,0)
+submitKeyButton.Position = UDim2.new(0.2,0,0.75,0)
+submitKeyButton.Text = "VERIFIKASI KEY"
+submitKeyButton.Font = Enum.Font.SourceSansBold
+submitKeyButton.TextScaled = true
+submitKeyButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+submitKeyButton.TextColor3 = Color3.fromRGB(255,255,255)
+submitKeyButton.Parent = keyMenu
+
+local submitCorner = Instance.new("UICorner")
+submitCorner.CornerRadius = UDim.new(0,10)
+submitCorner.Parent = submitKeyButton
+
+local submitBorder = Instance.new("UIStroke")
+submitBorder.Thickness = 2
+submitBorder.Color = Color3.fromRGB(0, 120, 200)
+submitBorder.Parent = submitKeyButton
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0.9,0,0.08,0)
+statusLabel.Position = UDim2.new(0.05,0,0.9,0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.fromRGB(255,255,255)
+statusLabel.Font = Enum.Font.SourceSans
+statusLabel.TextScaled = true
+statusLabel.Text = ""
+statusLabel.Parent = keyMenu
+
+local mainMenu = Instance.new("Frame")
+mainMenu.Name = "MainMenu"
+mainMenu.Size = UDim2.new(1,0,1,0)
+mainMenu.BackgroundTransparency = 1
+mainMenu.Visible = false 
+mainMenu.Parent = menuFrame
+
+local keyTimerLabel = Instance.new("TextLabel")
+keyTimerLabel.Size = UDim2.new(0.9,0,0.08,0)
+keyTimerLabel.Position = UDim2.new(0.05,0,0.88,0) 
+keyTimerLabel.BackgroundTransparency = 1
+keyTimerLabel.TextColor3 = Color3.fromRGB(255,255,0) 
+keyTimerLabel.Font = Enum.Font.SourceSansBold
+keyTimerLabel.TextScaled = true
+keyTimerLabel.Text = "Durasi Key: N/A"
+keyTimerLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0) 
+keyTimerLabel.TextStrokeTransparency = 0.7 
+keyTimerLabel.Parent = mainMenu
+
+local tpMenu = Instance.new("Frame")
+tpMenu.Name = "TeleportMenu"
+tpMenu.Size = UDim2.new(1,0,1,0)
+tpMenu.BackgroundTransparency = 1
+tpMenu.Visible = false
+tpMenu.Parent = menuFrame 
+
+local runMenu = Instance.new("Frame")
+runMenu.Name = "RunMenu"
+runMenu.Size = UDim2.new(1,0,1,0)
+runMenu.BackgroundTransparency = 1
+runMenu.Visible = false
+runMenu.Parent = menuFrame 
+
+-- ================= TOMBOL FITUR V3 ===================
+local flyButton = createButton(mainMenu, "Fly: OFF", 0.05)
+local noclipButton = createButton(mainMenu, "Tembus: OFF", 0.19)
+local tpButton = createButton(mainMenu, "Teleport", 0.33)
+local runButton = createButton(mainMenu, "Lari Cepat", 0.47)
+local logoutButton = createButton(mainMenu, "Logout", 0.61)
+logoutButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+
+-- ================= FITUR LARI CEPAT - PERBAIKAN ===================
+-- Speed Settings Box
+local speedBox = Instance.new("TextBox") 
+speedBox.Size = UDim2.new(0.8,0,0.12,0)
+speedBox.Position = UDim2.new(0.1,0,0.1,0)
+speedBox.PlaceholderText = "Masukkan kecepatan (contoh: 50)"
+speedBox.Text = "50" 
+speedBox.TextScaled = true
+speedBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+speedBox.TextColor3 = Color3.fromRGB(255,255,255)
+speedBox.TextXAlignment = Enum.TextXAlignment.Center
+speedBox.Parent = runMenu
+
+local speedBoxCorner = Instance.new("UICorner")
+speedBoxCorner.CornerRadius = UDim.new(0,8)
+speedBoxCorner.Parent = speedBox
+
+-- Speed On/Off Button
+local speedOnOff = Instance.new("TextButton") 
+speedOnOff.Size = UDim2.new(0.8,0,0.12,0)
+speedOnOff.Position = UDim2.new(0.1,0,0.25,0)
+speedOnOff.Text = "LARI CEPAT: OFF"
+speedOnOff.Font = Enum.Font.SourceSansBold
+speedOnOff.TextScaled = true
+speedOnOff.BackgroundColor3 = Color3.fromRGB(0,170,255)
+speedOnOff.TextColor3 = Color3.fromRGB(255,255,255)
+speedOnOff.Parent = runMenu
+
+local speedButtonCorner = Instance.new("UICorner")
+speedButtonCorner.CornerRadius = UDim.new(0,8)
+speedButtonCorner.Parent = speedOnOff
+
+-- Speed Info Label
+local speedInfo = Instance.new("TextLabel")
+speedInfo.Size = UDim2.new(0.8,0,0.2,0)
+speedInfo.Position = UDim2.new(0.1,0,0.4,0)
+speedInfo.BackgroundTransparency = 1
+speedInfo.Text = "Kecepatan normal: 16\nKecepatan VIP: sesuai input"
+speedInfo.TextColor3 = Color3.fromRGB(200,200,200)
+speedInfo.Font = Enum.Font.SourceSans
+speedInfo.TextScaled = true
+speedInfo.TextWrapped = true
+speedInfo.Parent = runMenu
+
+-- Back Button untuk Run Menu
+local runBack = Instance.new("TextButton")
+runBack.Size = UDim2.new(0.8,0,0.12,0)
+runBack.Position = UDim2.new(0.1,0,0.65,0)
+runBack.Text = "KEMBALI KE MENU UTAMA"
+runBack.Font = Enum.Font.SourceSansBold
+runBack.TextScaled = true
+runBack.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+runBack.TextColor3 = Color3.fromRGB(255,255,255)
+runBack.Parent = runMenu
+
+local runBackCorner = Instance.new("UICorner")
+runBackCorner.CornerRadius = UDim.new(0,8)
+runBackCorner.Parent = runBack
+
+-- ================= FUNGSI TOGGLE V3 ===================
+local function toggleFly(forceState)
+    flying = forceState ~= nil and forceState or not flying
+    _G.flying = flying
+    if flyButton then 
+        flyButton.Text = flying and "Fly: ON" or "Fly: OFF"
+        flyButton.BackgroundColor3 = flying and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(0, 150, 255)
+    end
+    if not flying and HRP then HRP.Velocity = Vector3.zero end
+end
+_G.ToggleFly = toggleFly
+
+local function toggleNoclip(forceState)
+    noclipEnabled = forceState ~= nil and forceState or not noclipEnabled
+    _G.noclipEnabled = noclipEnabled
+    if noclipButton then 
+        noclipButton.Text = noclipEnabled and "Tembus: ON" or "Tembus: OFF"
+        noclipButton.BackgroundColor3 = noclipEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(0, 150, 255)
+    end
+    if Player.Character then setNoclip(Player.Character) end
+end
+_G.ToggleNoclip = toggleNoclip
+
+local function toggleSpeed(forceState)
+    speedEnabled = forceState ~= nil and forceState or not speedEnabled
+    _G.speedEnabled = speedEnabled
+    
+    if speedOnOff then 
+        speedOnOff.Text = speedEnabled and "LARI CEPAT: ON" or "LARI CEPAT: OFF" 
+        speedOnOff.BackgroundColor3 = speedEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(0, 170, 255)
+    end
+
+    if hum and speedBox then
+        local val = tonumber(speedBox.Text)
+        
+        if speedEnabled then
+            -- FITUR AKTIF: Hanya jika ada nilai di textbox
+            if val and val > 0 then
+                hum.WalkSpeed = val
+                print("[VIP SPEED] Activated:", val)
+            else
+                -- Jika textbox kosong, auto matikan fitur
+                speedEnabled = false
+                if speedOnOff then 
+                    speedOnOff.Text = "LARI CEPAT: OFF"
+                    speedOnOff.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+                end
+                print("[VIP SPEED] No value in textbox, keeping server speed")
+            end
+        else
+            -- FITUR MATI: JANGAN SENTUH SPEED!
+            hum.WalkSpeed = 16 -- Kembalikan ke kecepatan normal
+            print("[VIP SPEED] Deactivated - Return to normal speed")
+        end
+    end
+end
+_G.ToggleSpeed = toggleSpeed
+
+-- ================= Key Timer ===================
+local timerLoopActive = false
+local function startKeyTimer(initialSeconds)
+    keyRemainingSeconds = initialSeconds or 0
+    if timerLoopActive then return end
+    timerLoopActive = true
+    task.spawn(function()
+        while keyRemainingSeconds > 0 and isKeyValid() and timerLoopActive do
+            keyTimerLabel.Text = "Key Tersisa: " .. formatTime(keyRemainingSeconds)
+            if keyRemainingSeconds <= 300 and keyRemainingSeconds > 0 then 
+                keyTimerLabel.TextColor3 = Color3.fromRGB(255, 50, 50) 
+            elseif keyRemainingSeconds > 300 then
+                keyTimerLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+            end
+            task.wait(1)
+            keyRemainingSeconds = keyRemainingSeconds - 1
+        end
+        timerLoopActive = false
+        if keyRemainingSeconds <= 0 then
+            keyTimerLabel.Text = "Key Habis Masa Berlaku!"
+            keyTimerLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+            performLogout()
+        end
+    end)
+end
+_G.startKeyTimer = startKeyTimer
+
+-- ================= Key Validation V3 ===================
+local function validateKey(key)
+    if string.len(key) == 0 then
+        statusLabel.Text = "Masukkan Key terlebih dahulu!"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+        return false
+    end
+    
+    statusLabel.Text = "Memverifikasi..."
+    statusLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+    
+    local randomParam = tostring(tick()):gsub("%.", "")
+    local url = BASE_URL .. "?key=" .. key .. "&userid=" .. Player.UserId .. "&_r=" .. randomParam
+    print("[VALIDATE] URL:", url)
+    
+    local success, responseBody = pcall(function()
+        return game:HttpGet(url, true, {Timeout = 10})
+    end)
+    
+    if not success then
+        statusLabel.Text = "Koneksi gagal. Coba lagi."
+        statusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+        return false
+    end
+    
+    if not responseBody or string.len(responseBody) == 0 then
+        statusLabel.Text = "Server tidak merespon."
+        statusLabel.TextColor3 = Color3.fromRGB(255, 140, 0)
+        return false
+    end
+    
+    print("[DEBUG] Response received, length:", #responseBody)
+    
+    local jsonSuccess, data = pcall(function()
+        return HttpService:JSONDecode(responseBody)
+    end)
+    
+    if not jsonSuccess then
+        print("[ERROR] Failed to parse JSON. Response:", string.sub(responseBody, 1, 200))
+        statusLabel.Text = "Format response tidak valid"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 0)
+        return false
+    end
+    
+    if data then
+        if data.success then
+            setKeyStatus(true)
+            currentKey = key
+            keyRemainingSeconds = data.remainingSeconds or 0
+            
+            print("[VALIDATE] Success! Remaining seconds:", keyRemainingSeconds)
+            statusLabel.Text = "Key valid!"
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+            
+            if keyRemainingSeconds > 0 then
+                startKeyTimer(keyRemainingSeconds)
+            end
+            
+            task.delay(1, function()
+                startHeartbeat()
+            end)
+            
+            task.wait(0.1)
+            
+            keyMenu.Visible = false
+            mainMenu.Visible = true
+            tpMenu.Visible = false 
+            runMenu.Visible = false
+            menuFrame.Visible = true 
+            
+            flying = false
+            noclipEnabled = false
+            speedEnabled = false
+            _G.flying = false
+            _G.noclipEnabled = false
+            _G.speedEnabled = false
+            
+            flyButton.Text = "Fly: OFF"
+            flyButton.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+            noclipButton.Text = "Tembus: OFF"
+            noclipButton.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+            speedOnOff.Text = "LARI CEPAT: OFF"
+            speedOnOff.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+            
+            return true
+            
+        elseif data.error then
+            if data.waitTime then
+                statusLabel.Text = string.format("Key dipakai. Coba lagi dalam %d detik", data.waitTime)
+            elseif data.error:find("expired") then
+                statusLabel.Text = "Key sudah expired!"
+            elseif data.error:find("sedang dipakai") then
+                statusLabel.Text = "Key sedang dipakai orang lain!"
+            elseif data.error:find("dinonaktifkan") then
+                statusLabel.Text = "Key dinonaktifkan admin!"
+            else
+                statusLabel.Text = "Key tidak valid!"
+            end
+            
+            statusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+            return false
+        else
+            statusLabel.Text = "Response tidak dikenali"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 0)
+            return false
+        end
+    else
+        statusLabel.Text = "Data tidak ditemukan"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 0)
+        return false
+    end
+end
+
+submitKeyButton.MouseButton1Click:Connect(function()
+    local key = keyBox.Text:match("^%s*(.-)%s*$") 
+    print("[SUBMIT] Validating key:", key)
+    task.spawn(validateKey, key) 
+end)
+
+-- ================= LOGOUT V3 ===================
+local function performLogout()
+    print("[LOGOUT] Starting logout...")
+    
+    stopHeartbeat()
+    
+    if currentKey ~= "" then
+        serverLogout()
+    end
+    
+    if _G.ToggleFly and flying then _G.ToggleFly(false) end
+    if _G.ToggleNoclip and noclipEnabled then _G.ToggleNoclip(false) end
+    if _G.ToggleSpeed and speedEnabled then _G.ToggleSpeed(false) end
+    
+    setKeyStatus(false)
+    currentKey = ""
+    keyRemainingSeconds = 0
+    timerLoopActive = false
+    heartbeatActive = false
+    
+    -- Reset kecepatan ke normal
+    if hum then
+        hum.WalkSpeed = 16
+    end
+    
+    keyBox.Text = ""
+    statusLabel.Text = ""
+    statusLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    keyTimerLabel.Text = "Durasi Key: N/A"
+    keyTimerLabel.TextColor3 = Color3.fromRGB(255,255,0)
+    
+    mainMenu.Visible = false
+    tpMenu.Visible = false
+    runMenu.Visible = false
+    keyMenu.Visible = true
+    menuFrame.Visible = false
+    menuOpen = false
+    
+    print("[LOGOUT] Complete!")
+end
+
+-- ================= AUTO-LOGOUT ===================
+game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
+    if leavingPlayer == Player and currentKey ~= "" then
+        print("[AUTO-LOGOUT] Player leaving")
+        serverLogout()
+    end
+end)
+
+-- ================= Menu Toggle ===================
+logoButton.MouseButton1Click:Connect(function()
+    menuOpen = not menuOpen 
+    menuFrame.Visible = menuOpen 
+    if menuOpen then
+        if isKeyValid() then
+            keyMenu.Visible = false
+            mainMenu.Visible = true
+            tpMenu.Visible = false
+            runMenu.Visible = false
+        else
+            keyMenu.Visible = true
+            mainMenu.Visible = false
+        end
+    end
+end)
+
+local dragging = false
+local dragStart = Vector2.new()
+local startPos = UDim2.new()
+local dragInput = nil
+local function update(input)
+    if dragging then
+        local delta = input.Position - dragStart
+        menuFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end
+menuFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = menuFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+menuFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+end)
+UIS.InputChanged:Connect(function(input)
+    if input == dragInput then update(input) end
+end)
+
+-- ================= Tombol Koneksi ===================
+flyButton.MouseButton1Click:Connect(function()
+    if not isKeyValid() or not HRP then return end
+    toggleFly()
+end)
+
+noclipButton.MouseButton1Click:Connect(function()
+    if not isKeyValid() then return end
+    toggleNoclip()
+end)
+
+logoutButton.MouseButton1Click:Connect(function()
+    if not isKeyValid() then return end
+    performLogout()
+end)
+
+-- ================= TELEPORT MENU - PERBAIKAN ===================
+local tpFrame = Instance.new("ScrollingFrame")
+tpFrame.Size = UDim2.new(0.9,0,0.7,0)
+tpFrame.Position = UDim2.new(0.05,0,0.05,0)
+tpFrame.BackgroundTransparency = 0.1
+tpFrame.BorderSizePixel = 0
+tpFrame.ScrollBarThickness = 8
+tpFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+tpFrame.Parent = tpMenu
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Padding = UDim.new(0,5)
+uiListLayout.Parent = tpFrame
+
+local tpTemplate = Instance.new("TextButton")
+tpTemplate.Size = UDim2.new(1,0,0,30)
+tpTemplate.BackgroundColor3 = Color3.fromRGB(0,170,255)
+tpTemplate.TextColor3 = Color3.fromRGB(255,255,255)
+tpTemplate.Font = Enum.Font.SourceSans
+tpTemplate.TextScaled = true
+tpTemplate.TextXAlignment = Enum.TextXAlignment.Left
+tpTemplate.AutoButtonColor = true
+tpTemplate.Visible = false
+tpTemplate.Name = "PlayerTemplate"
+tpTemplate.Parent = tpFrame
+
+local tpTemplateCorner = Instance.new("UICorner")
+tpTemplateCorner.CornerRadius = UDim.new(0,6)
+tpTemplateCorner.Parent = tpTemplate
+
+local tpNotifyLabel = Instance.new("TextLabel")
+tpNotifyLabel.Size = UDim2.new(0.9,0,0.12,0)
+tpNotifyLabel.Position = UDim2.new(0.05,0,0.78,0)
+tpNotifyLabel.BackgroundColor3 = Color3.fromRGB(255,50,50)
+tpNotifyLabel.TextColor3 = Color3.fromRGB(255,255,255)
+tpNotifyLabel.TextScaled = true
+tpNotifyLabel.Font = Enum.Font.SourceSansBold
+tpNotifyLabel.Text = ""
+tpNotifyLabel.TextXAlignment = Enum.TextXAlignment.Left
+tpNotifyLabel.TextYAlignment = Enum.TextYAlignment.Top
+tpNotifyLabel.TextWrapped = true
+tpNotifyLabel.Visible = false
+tpNotifyLabel.Parent = tpMenu
+
+local tpBack = Instance.new("TextButton")
+tpBack.Size = UDim2.new(0.8,0,0.12,0)
+tpBack.Position = UDim2.new(0.1,0,0.92,0)
+tpBack.Text = "KEMBALI KE MENU UTAMA"
+tpBack.Font = Enum.Font.SourceSansBold
+tpBack.TextScaled = true
+tpBack.BackgroundColor3 = Color3.fromRGB(200,50,50)
+tpBack.TextColor3 = Color3.fromRGB(255,255,255)
+tpBack.TextXAlignment = Enum.TextXAlignment.Left
+tpBack.Parent = tpMenu
+
+local tpBackCorner = Instance.new("UICorner")
+tpBackCorner.CornerRadius = UDim.new(0,8)
+tpBackCorner.Parent = tpBack
+
+-- PERBAIKAN: Sistem teleport yang lebih baik
+local playerButtons = {} -- Table untuk menyimpan reference button
+
+local function refreshPlayerList()
+    -- Hapus semua button yang ada
+    for _, btn in pairs(playerButtons) do
+        if btn and btn.Parent then
+            btn:Destroy()
+        end
+    end
+    playerButtons = {} -- Reset table
+    
+    -- Dapatkan semua pemain
+    local allPlayers = {}
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= Player then 
+            table.insert(allPlayers, plr)
+        end
+    end
+    
+    -- Urutkan berdasarkan nama
+    table.sort(allPlayers, function(a,b) 
+        return a.Name:lower() < b.Name:lower() 
+    end)
+    
+    -- Buat button untuk setiap pemain
+    for _, plr in ipairs(allPlayers) do
+        local btn = tpTemplate:Clone()
+        btn.Visible = true
+        btn.Text = "👉 " .. plr.Name
+        btn.Name = "TP_" .. plr.Name -- Nama unik
+        btn.Parent = tpFrame
+        
+        -- Simpan reference
+        playerButtons[plr.Name] = btn
+        
+        -- Tambahkan event teleport
+        btn.MouseButton1Click:Connect(function()
+            if not HRP then 
+                tpNotifyLabel.Text = "Karakter Anda belum siap!"
+                tpNotifyLabel.Visible = true
+                task.wait(2)
+                tpNotifyLabel.Visible = false
+                return 
+            end
+            
+            local targetChar = plr.Character
+            if not targetChar then
+                tpNotifyLabel.Text = plr.Name .. " tidak memiliki karakter!"
+                tpNotifyLabel.Visible = true
+                task.wait(2)
+                tpNotifyLabel.Visible = false
+                return
+            end
+            
+            local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+            if not targetHRP then
+                tpNotifyLabel.Text = "Tidak dapat menemukan " .. plr.Name
+                tpNotifyLabel.Visible = true
+                task.wait(2)
+                tpNotifyLabel.Visible = false
+                return
+            end
+            
+            -- TELEPORT dengan metode yang lebih baik
+            tpNotifyLabel.Text = "Teleporting to " .. plr.Name .. "..."
+            tpNotifyLabel.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+            tpNotifyLabel.Visible = true
+            
+            -- Coba beberapa metode teleport
+            local success = false
+            
+            -- Metode 1: Direct CFrame
+            HRP.CFrame = CFrame.new(targetHRP.Position + Vector3.new(0, 3, 0))
+            success = true
+            
+            -- Metode 2: Jika gagal, coba dengan yield
+            if not success then
+                task.wait(0.1)
+                HRP.CFrame = CFrame.new(targetHRP.Position + Vector3.new(0, 3, 0))
+                success = true
+            end
+            
+            if success then
+                tpNotifyLabel.Text = "✅ Berhasil teleport ke " .. plr.Name
+                tpNotifyLabel.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+                task.wait(1.5)
+                tpNotifyLabel.Visible = false
+            else
+                tpNotifyLabel.Text = "❌ Gagal teleport ke " .. plr.Name
+                tpNotifyLabel.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+                task.wait(1.5)
+                tpNotifyLabel.Visible = false
+            end
+        end)
+    end
+end
+
+-- PERBAIKAN: Gunakan event yang lebih tepat
+local function onPlayerAdded(plr)
+    task.wait(0.5)
+    if tpMenu.Visible then
+        refreshPlayerList()
+    end
+end
+
+local function onPlayerRemoving(plr)
+    task.wait(0.5)
+    if tpMenu.Visible then
+        refreshPlayerList()
+    end
+end
+
+-- PERBAIKAN: Subscribe events dengan benar
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+tpButton.MouseButton1Click:Connect(function()
+    if not isKeyValid() then return end
+    mainMenu.Visible = false
+    tpMenu.Visible = true
+    -- Refresh saat menu dibuka
+    refreshPlayerList()
+end)
+
+tpBack.MouseButton1Click:Connect(function()
+    tpMenu.Visible = false
+    mainMenu.Visible = true
+    tpNotifyLabel.Visible = false
+end)
+
+-- ================= RUN MENU - PERBAIKAN ===================
+runButton.MouseButton1Click:Connect(function()
+    if not isKeyValid() then return end
+    mainMenu.Visible = false
+    tpMenu.Visible = false
+    runMenu.Visible = true
+end)
+
+speedOnOff.MouseButton1Click:Connect(function()
+    if not isKeyValid() then return end
+    toggleSpeed()
+end)
+
+runBack.MouseButton1Click:Connect(function()
+    runMenu.Visible = false
+    mainMenu.Visible = true
+end)
+
+-- Event untuk speedBox
+speedBox.FocusLost:Connect(function()
+    local val = tonumber(speedBox.Text)
+    if val and val > 0 and speedEnabled then
+        -- Jika speed sedang aktif, update kecepatan
+        hum.WalkSpeed = val
+        print("[VIP SPEED] Updated to:", val)
+    end
+end)
+
+-- ================= Update per Frame V3 ===================
+RS.RenderStepped:Connect(function()
+    local character = Player.Character
+    if character then
+        if noclipEnabled and _G.noclipEnabled then
+            setNoclip(character)
+        end
+        if flying and HRP and _G.flying then
+            local move = Vector3.zero
+            local cam = Workspace.CurrentCamera
+            if UIS:IsKeyDown(Enum.KeyCode.W) then move += cam.CFrame.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then move -= cam.CFrame.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.A) then move -= cam.CFrame.RightVector end
+            if UIS:IsKeyDown(Enum.KeyCode.D) then move += cam.CFrame.RightVector end
+            if UIS:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.new(0,1,0) end
+            if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.new(0,1,0) end
+            if move.Magnitude > 0 then move = move.Unit * speedFly end
+            HRP.Velocity = move
+            flyPlatform.CFrame = CFrame.new(HRP.Position - Vector3.new(0,3.3,0))
+        end
+    end
+end)
+
+print("==========================================")
+print("System V3 loaded successfully!")
+print("Fitur yang tersedia:")
+print("- Fly System")
+print("- Noclip/Tembus")
+print("- Teleport Player (Fixed)")
+print("- Speed Boost (Fixed)")
+print("- Key Validation System")
+print("==========================================")
